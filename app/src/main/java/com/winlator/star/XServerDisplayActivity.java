@@ -4,9 +4,12 @@ import static com.winlator.star.core.AppUtils.showToast;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.ClipboardManager;
+import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -14,6 +17,7 @@ import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.net.Uri;
+import android.graphics.Color;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -23,12 +27,15 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
+import android.widget.Button;
+import android.widget.EditText;
 import android.widget.CheckBox;
 import android.widget.Toast;
 import android.widget.FrameLayout;
@@ -1843,6 +1850,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         
         setContentView(R.layout.xserver_display_activity);
         com.winlator.star.ui.PreloaderOverlayHelper.attach(this);
+
+        addInputOverlayButton();
 
         preloaderDialog = new PreloaderDialog(this);
         // Route the failure card's buttons back to this activity (cleared in onDestroy).
@@ -13175,6 +13184,112 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Fallback to existing input handling
         return (!inputControlsView.onKeyEvent(event) && !winHandler.onKeyEvent(event) && xServer.keyboard.onKeyEvent(event)) ||
                 (!ExternalController.isGameController(event.getDevice()) && super.dispatchKeyEvent(event));
+    }
+
+    /**
+     * 弹出中文输入框
+     */
+    public void showChineseInputDialog() {
+    	runOnUiThread(() -> {
+    		final EditText input = new EditText(this);
+    		input.setHint("请输入要注入的文本");
+    		input.setPadding(50, 40, 50, 40);
+
+    		input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEND);
+    		input.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+
+    		AlertDialog dialog = new AlertDialog.Builder(this)
+    			.setTitle("🎮 中文文本注入")
+    			.setView(input)    		
+    			.setNegativeButton("关闭", null)
+    			.create();
+
+    		input.setOnEditorActionListener((v, actionId, event) -> {
+    			boolean isSendAction = actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+    								|| actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+    								|| actionId == android.view.inputmethod.EditorInfo.IME_NULL;
+				boolean isEnterKeyPressed = (event != null
+										&& event.getKeyCode() == android.view.KeyEvent.KEYCODE_ENTER
+										&& event.getAction() == android.view.KeyEvent.ACTION_DOWN);
+
+    			if (isSendAction || isEnterKeyPressed) {
+    				String text = input.getText().toString();
+    				if (!text.isEmpty()) {
+    					sendTextToGameViaClipboard(text);
+    				}
+    				dialog.dismiss();
+    				return true;
+    			}
+    			return false;
+    		});
+
+    		if (dialog.getWindow() != null) {
+    			dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+    		}
+    		
+    		dialog.show();
+    		input.requestFocus();
+    	});
+    }
+
+    /**
+     * 写入剪贴板并延迟模拟按键 Ctrl + V
+     */
+    private void sendTextToGameViaClipboard(String text) {
+    	ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+    	if (clipboard != null) {
+    		ClipData clip = ClipData.newPlainText("test", text);
+    		clipboard.setPrimaryClip(clip);
+    	}
+
+    	Toast.makeText(this, "正在注入到游戏...", Toast.LENGTH_SHORT).show();
+
+    	new Handler(Looper.getMainLooper()).postDelayed(() -> {
+    		dispatchCustomKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_CTRL_LEFT));
+    		dispatchCustomKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_V));
+    		dispatchCustomKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_V));
+    		dispatchCustomKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_CTRL_LEFT));
+    		dispatchCustomKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
+    		dispatchCustomKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
+    	}, 100);
+    }
+
+    /**
+     * 分发虚拟 KeyEvent 到当前 Activity/WinHandler/XServer
+     */
+    private void dispatchCustomKeyEvent(KeyEvent event) {
+    	if (winHandler != null) {
+    		winHandler.onKeyEvent(event);
+    	}
+
+    	if (xServer != null && xServer.keyboard != null) {
+    		xServer.keyboard.onKeyEvent(event);
+    	}
+
+    	super.dispatchKeyEvent(event);
+    }
+
+    /**
+     * 添加半透明悬浮按钮
+     */
+    private void addInputOverlayButton() {
+    	runOnUiThread(() -> {
+    		Button overlayBtn = new Button(this);
+    		overlayBtn.setPadding(0, 0, 0, 0);
+    		overlayBtn.setText("T");
+    		overlayBtn.setTextColor(Color.WHITE);
+    		overlayBtn.setTextSize(14);
+    		overlayBtn.setBackgroundColor(Color.parseColor("#80222222"));
+
+    		FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(110, 110);
+    		params.gravity = Gravity.TOP | Gravity.END;
+    		params.topMargin = 120;
+    		params.rightMargin = 40;
+
+    		overlayBtn.setOnClickListener(v -> showChineseInputDialog());
+
+    		addContentView(overlayBtn, params);
+    	});
     }
 
     /** Map an Android KeyEvent keyCode to a Linux evdev keycode (for wl_keyboard in wayland mode).
